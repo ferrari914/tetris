@@ -105,6 +105,22 @@ body:not(.touch) #hint{display:block}
   padding:12px 13px;color:var(--text);font-family:inherit;font-size:15px;outline:none}
 #nameInput:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(55,224,240,.12)}
 .err{font-size:11.5px;color:#ff8ba0;min-height:15px;line-height:1.5}
+/* --- 부활 퀴즈 --- */
+.btn.revive{background:linear-gradient(180deg,#ffd98a,#f0ab3c);color:#241703}
+.quizKo{font-size:13px;color:var(--muted);line-height:1.7;word-break:keep-all}
+.quizEn{font-size:15.5px;line-height:1.9;font-weight:600;word-break:keep-all}
+.quizEn .blank{display:inline-block;min-width:72px;padding:0 6px;border-bottom:2px solid var(--accent);
+  color:var(--accent);text-align:center;font-weight:800}
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.choice{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:11px;
+  padding:13px 8px;font-size:14.5px;font-weight:700;font-family:inherit;cursor:pointer;line-height:1.35}
+.choice:active{transform:translateY(1px)}
+.choice:disabled{cursor:default;opacity:.45}
+.choice.ok{background:rgba(55,224,240,.16);border-color:var(--accent);color:var(--accent);opacity:1}
+.choice.no{background:rgba(255,139,160,.13);border-color:#ff8ba0;color:#ff8ba0;opacity:1}
+.quizRes{font-size:12.5px;line-height:1.7;min-height:18px}
+.quizRes.ok{color:var(--accent);font-weight:700}
+.quizRes.no{color:#ff8ba0}
 </style>
 </head>
 <body>
@@ -127,6 +143,7 @@ body:not(.touch) #hint{display:block}
         <h1 id="ovTitle">동욱's 테트리스</h1>
         <p id="ovText"></p>
         <div class="btnRow">
+          <button class="btn sm revive" id="ovRevive" style="display:none">부활 찬스</button>
           <button class="btn sm" id="ovBtn">시작하기</button>
           <button class="btn ghost sm" id="ovSubmit" style="display:none">랭킹 등록</button>
           <button class="btn ghost sm" id="ovRank">랭킹 보기</button>
@@ -161,6 +178,20 @@ body:not(.touch) #hint{display:block}
       <div class="btnRow">
         <button class="btn sm" id="nameSubmit">등록하기</button>
         <button class="btn ghost sm" id="nameCancel">취소</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet" id="quizSheet">
+    <div class="card">
+      <div class="cardHead"><h2>부활 찬스 · 영어 문제</h2><button class="x" id="quizClose" aria-label="닫기">✕</button></div>
+      <p class="status">빈칸에 알맞은 단어를 고르면 부활합니다. 기회는 한 판에 딱 한 번!</p>
+      <p class="quizKo" id="quizKo"></p>
+      <p class="quizEn" id="quizEn"></p>
+      <div class="choices" id="quizChoices"></div>
+      <p class="quizRes" id="quizRes"></p>
+      <div class="btnRow" id="quizAfter" style="display:none">
+        <button class="btn sm" id="quizDone">확인</button>
       </div>
     </div>
   </div>
@@ -401,6 +432,7 @@ function gameOver(){
   updateUI();
   lastRun={score:score,level:level,lines:lines,best:best};
   showOverlay('GAME OVER','점수 <b>'+score.toLocaleString()+'</b> · 라인 <b>'+lines+'</b><br>최고 기록 <b>'+best.toLocaleString()+'</b>','다시 하기', score>0);
+  if(!reviveUsed) ovRevive.style.display='';
 }
 
 /* ---------- 렌더링 ---------- */
@@ -518,6 +550,7 @@ function showMsg(t){
 function showOverlay(title,text,btn,withSubmit){
   ovTitle.textContent=title; ovText.innerHTML=text; ovBtn.textContent=btn;
   ovSubmit.style.display = withSubmit ? '' : 'none';
+  if(typeof ovRevive!=='undefined' && ovRevive) ovRevive.style.display='none';
   overlay.classList.add('show');
 }
 function hideOverlay(){ overlay.classList.remove('show'); }
@@ -529,6 +562,7 @@ function reset(){
   holdType=null; canHold=true; piece=null; pending=null; clearRows=null;
   dropTimer=0; lockTimer=0; lockResets=0; clearTimer=0;
   das.dir=0; softHeld=false;
+  reviveUsed=false;
   updateUI(); drawTrays();
 }
 function start(){ reset(); state='playing'; nextPiece(); drawTrays(); hideOverlay(); }
@@ -746,8 +780,8 @@ function openName(){
   nameInput.value=lsGet('tetris.rank.name','')||'';
   setTimeout(function(){ try{ nameInput.focus(); nameInput.select(); }catch(e){} },80);
 }
-function closeSheets(){ rankSheet.classList.remove('show'); nameSheet.classList.remove('show'); }
-function sheetOpen(){ return rankSheet.classList.contains('show')||nameSheet.classList.contains('show'); }
+function closeSheets(){ rankSheet.classList.remove('show'); nameSheet.classList.remove('show'); quizSheet.classList.remove('show'); }
+function sheetOpen(){ return rankSheet.classList.contains('show')||nameSheet.classList.contains('show')||quizSheet.classList.contains('show'); }
 function doSubmit(){
   if(!lastRun) return;
   var v=cleanName(nameInput.value), err=nameError(v);
@@ -783,6 +817,122 @@ nameSubmit.addEventListener('click',doSubmit);
 nameInput.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); doSubmit(); } });
 rankSheet.addEventListener('click',function(e){ if(e.target===rankSheet) closeSheets(); });
 nameSheet.addEventListener('click',function(e){ if(e.target===nameSheet) closeSheets(); });
+
+/* ---------- 부활 (영어 빈칸 문제) ---------- */
+/* 한 판에 딱 한 번. 정답이면 보드 위쪽 절반을 비우고 점수를 유지한 채 이어서 진행. */
+var QUIZ=[
+ {k:'그 연구 결과는 우리의 가설을 뒷받침한다.',e:'The findings ___ our hypothesis.',a:'support',d:['refuse','ignore','delay']},
+ {k:'그는 자신의 실수를 인정할 만큼 겸손했다.',e:'He was humble enough to ___ his mistake.',a:'admit',d:['deny','avoid','blame']},
+ {k:'정부는 새로운 정책을 시행할 예정이다.',e:'The government will ___ a new policy.',a:'implement',d:['postpone','criticize','inherit']},
+ {k:'이 규칙에는 몇 가지 예외가 있다.',e:'There are a few ___ to this rule.',a:'exceptions',d:['obstacles','alternatives','instruments']},
+ {k:'그녀의 주장은 꽤 설득력이 있었다.',e:'Her argument was quite ___.',a:'convincing',d:['confusing','offensive','temporary']},
+ {k:'우리는 자원을 효율적으로 배분해야 한다.',e:'We must ___ our resources efficiently.',a:'allocate',d:['abandon','exaggerate','imitate']},
+ {k:'그 소문은 근거가 없는 것으로 드러났다.',e:'The rumor turned out to be ___.',a:'groundless',d:['priceless','countless','restless']},
+ {k:'기후 변화는 전 세계적인 관심사이다.',e:'Climate change is a global ___.',a:'concern',d:['reward','custom','portion']},
+ {k:'그는 마감일을 맞추려고 무척 애썼다.',e:'He struggled to meet the ___.',a:'deadline',d:['headline','guideline','outline']},
+ {k:'이 앱은 사용자의 습관에 맞춰 적응한다.',e:'This app ___ to the user\u2019s habits.',a:'adapts',d:['adopts','admits','attends']},
+ {k:'그 두 이론은 서로 모순된다.',e:'The two theories ___ each other.',a:'contradict',d:['complete','resemble','reinforce']},
+ {k:'우리는 그 문제를 다양한 관점에서 봐야 한다.',e:'We should look at the issue from various ___.',a:'perspectives',d:['measures','procedures','quantities']},
+ {k:'그의 성공은 꾸준한 노력 덕분으로 여겨진다.',e:'His success is ___ to steady effort.',a:'attributed',d:['contributed','distributed','submitted']},
+ {k:'그 계획을 실행하려면 상당한 비용이 든다.',e:'Carrying out the plan involves ___ costs.',a:'considerable',d:['considerate','considering','considered']},
+ {k:'그녀는 회의에 참석할 수 없다고 우리에게 알렸다.',e:'She ___ us that she couldn\u2019t attend the meeting.',a:'informed',d:['suggested','explained','described']},
+ {k:'이 기계가 예전 모델을 대체했다.',e:'This machine ___ the old model.',a:'replaced',d:['repeated','repaired','reflected']},
+ {k:'그 결정은 되돌릴 수 없다.',e:'The decision is ___.',a:'irreversible',d:['irrelevant','irritable','irregular']},
+ {k:'많은 종이 멸종 위기에 처해 있다.',e:'Many species are in danger of ___.',a:'extinction',d:['extension','exception','expansion']},
+ {k:'그는 자신의 감정을 숨기려 애썼다.',e:'He tried to ___ his emotions.',a:'conceal',d:['reveal','release','resemble']},
+ {k:'실험 결과는 예측과 일치했다.',e:'The results were ___ with the prediction.',a:'consistent',d:['content','constant','convenient']},
+ {k:'그 회사는 환경 규제를 준수해야 한다.',e:'The company must ___ with environmental regulations.',a:'comply',d:['compete','complain','compare']},
+ {k:'그녀는 그 제안을 단호히 거절했다.',e:'She firmly ___ the offer.',a:'rejected',d:['accepted','expected','respected']},
+ {k:'이 문제는 즉각적인 조치를 요구한다.',e:'This problem ___ immediate action.',a:'requires',d:['acquires','inquires','resembles']},
+ {k:'그의 설명은 너무 모호해서 이해할 수 없었다.',e:'His explanation was too ___ to understand.',a:'vague',d:['vivid','valid','brief']},
+ {k:'우리는 다음 주까지 결정을 미루기로 했다.',e:'We decided to ___ the decision until next week.',a:'postpone',d:['propose','promote','pursue']},
+ {k:'그 사고는 부주의 때문에 일어났다.',e:'The accident was caused by ___.',a:'negligence',d:['intelligence','excellence','confidence']},
+ {k:'새로운 증거가 그의 결백을 입증했다.',e:'New evidence ___ his innocence.',a:'proved',d:['proposed','provided','prevented']},
+ {k:'그 나라는 심각한 경제 위기에 직면해 있다.',e:'The country is ___ a severe economic crisis.',a:'facing',d:['fading','feeding','folding']},
+ {k:'이 규정은 모든 직원에게 적용된다.',e:'This rule ___ to all employees.',a:'applies',d:['appeals','appears','approves']},
+ {k:'그는 그 프로젝트에서 결정적인 역할을 했다.',e:'He played a crucial ___ in the project.',a:'role',d:['rule','roll','goal']}
+];
+var quizSheet=document.getElementById('quizSheet');
+var quizKo=document.getElementById('quizKo'), quizEn=document.getElementById('quizEn');
+var quizChoices=document.getElementById('quizChoices'), quizRes=document.getElementById('quizRes');
+var quizAfter=document.getElementById('quizAfter'), quizDone=document.getElementById('quizDone');
+var quizClose=document.getElementById('quizClose'), ovRevive=document.getElementById('ovRevive');
+var reviveUsed=false, quizAnswered=false, quizCorrect=false, recentQ=[];
+
+function shuffleArr(a){ var i,j,t; for(i=a.length-1;i>0;i--){ j=Math.floor(Math.random()*(i+1)); t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+function pickQuiz(){
+  var i=0, guard=0;
+  do{ i=Math.floor(Math.random()*QUIZ.length); guard++; }while(recentQ.indexOf(i)>=0 && guard<60);
+  recentQ.push(i); if(recentQ.length>10) recentQ.shift();
+  return QUIZ[i];
+}
+function renderQuiz(q){
+  quizKo.textContent=q.k;
+  quizEn.innerHTML='';
+  var parts=q.e.split('___');
+  var blank=document.createElement('span');
+  blank.className='blank'; blank.textContent='?';
+  quizEn.appendChild(document.createTextNode(parts[0]));
+  quizEn.appendChild(blank);
+  quizEn.appendChild(document.createTextNode(parts[1]||''));
+  quizChoices.innerHTML='';
+  shuffleArr([q.a].concat(q.d)).forEach(function(w){
+    var b=document.createElement('button');
+    b.className='choice'; b.type='button'; b.textContent=w;
+    b.addEventListener('click',function(){ answerQuiz(q,w,b,blank); });
+    quizChoices.appendChild(b);
+  });
+  quizRes.className='quizRes'; quizRes.textContent='';
+  quizAfter.style.display='none';
+}
+function openQuiz(){
+  if(reviveUsed || state!=='over') return;
+  quizAnswered=false; quizCorrect=false;
+  renderQuiz(pickQuiz());
+  quizSheet.classList.add('show');
+}
+function answerQuiz(q,w,btn,blank){
+  if(quizAnswered) return;
+  quizAnswered=true; reviveUsed=true;
+  blank.textContent=w;
+  Array.prototype.forEach.call(quizChoices.children,function(b){ b.disabled=true; });
+  if(w===q.a){
+    quizCorrect=true;
+    btn.classList.add('ok');
+    quizRes.className='quizRes ok';
+    quizRes.textContent='정답! 위쪽을 정리하고 이어서 갑니다.';
+    quizDone.textContent='이어서 하기';
+  } else {
+    btn.classList.add('no');
+    Array.prototype.forEach.call(quizChoices.children,function(b){ if(b.textContent===q.a) b.classList.add('ok'); });
+    quizRes.className='quizRes no';
+    quizRes.textContent='아쉬워요. 정답은 “'+q.a+'” 입니다.';
+    quizDone.textContent='확인';
+  }
+  quizAfter.style.display='';
+  ovRevive.style.display='none';
+}
+function closeQuiz(){ quizSheet.classList.remove('show'); }
+function finishQuiz(){
+  closeQuiz();
+  if(quizCorrect){ quizCorrect=false; doRevive(); }
+}
+function doRevive(){
+  var cut=BUF+Math.floor(ROWS/2), y, x;
+  for(y=0;y<cut;y++) for(x=0;x<COLS;x++) board[y][x]=null;
+  combo=-1; b2b=false; canHold=true;
+  piece=null; pending=null; clearRows=null; lastRun=null;
+  dropTimer=0; lockTimer=0; lockResets=0; clearTimer=0;
+  das.dir=0; softHeld=false;
+  state='playing';
+  hideOverlay();
+  updateUI(); drawTrays();
+  if(nextPiece()) showMsg('REVIVE!');
+}
+ovRevive.addEventListener('click',openQuiz);
+quizDone.addEventListener('click',finishQuiz);
+quizClose.addEventListener('click',function(){ if(quizAnswered) finishQuiz(); else closeQuiz(); });
+quizSheet.addEventListener('click',function(e){ if(e.target!==quizSheet) return; if(quizAnswered) finishQuiz(); else closeQuiz(); });
 
 /* ---------- 루프 ---------- */
 function gravityMs(){ return GRAVITY[Math.min(level-1,GRAVITY.length-1)]; }
